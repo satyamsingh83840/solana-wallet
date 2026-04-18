@@ -1,170 +1,342 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { 
-  RefreshCw, Eye, EyeOff, ShieldAlert, Zap, 
-  Sparkles, ChevronDown, PlusCircle, Wallet, Key
+import {
+  Eye,
+  EyeOff,
+  Sparkles,
+  PlusCircle,
+  Copy,
+  ShieldAlert,
+  Loader2,
 } from "lucide-react";
-import { generateMnemonic, deriveAccounts, attachBalances, NetworkType } from "@/lib/wallet";
 
-// --- Components ---
+import {
+  generateMnemonic,
+  deriveAccounts,
+  attachBalances,
+  NetworkType,
+} from "@/lib/wallet";
 
-const Card = ({ children, className = "" }: { children: React.ReactNode, className?: string }) => (
-  <div className={`relative bg-zinc-900/40 border border-zinc-800/60 backdrop-blur-md rounded-3xl p-6 transition-all ${className}`}>
+// --- UI helpers ---
+
+const Card = ({ children }: any) => (
+  <div className="bg-zinc-900/60 border border-zinc-800 rounded-3xl p-6 backdrop-blur-xl shadow-xl">
     {children}
   </div>
 );
 
-const Button = ({ onClick, children, variant = "primary", className = "", ...props }: any) => {
-  const base = "flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-medium transition-all active:scale-[0.98]";
-  const variants = {
-    primary: "bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-900/20",
-    secondary: "bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700",
-    ghost: "bg-transparent hover:bg-zinc-800 text-zinc-400 hover:text-white"
-  };
-  
-  return (
-    <button onClick={onClick} className={`${base} ${variants[variant as keyof typeof variants]} ${className}`} {...props}>
-      {children}
-    </button>
-  );
-};
+const Toast = ({ text }: { text: string }) => (
+  <motion.div
+    initial={{ y: 40, opacity: 0 }}
+    animate={{ y: 0, opacity: 1 }}
+    exit={{ opacity: 0 }}
+    className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-indigo-600 text-white px-4 py-2 rounded-xl text-sm font-medium shadow-lg"
+  >
+    {text}
+  </motion.div>
+);
+
+// --- MAIN ---
 
 export default function Home() {
-  const [tab, setTab] = useState<"generate" | "import">("generate");
-  const [network, setNetwork] = useState<NetworkType>("devnet");
-  const [mnemonic, setMnemonic] = useState("");
-  const [accounts, setAccounts] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [showPrivate, setShowPrivate] = useState(false);
+  const [mode, setMode] = useState<"generate" | "import">("generate");
 
-  const handleLoadAccounts = async () => {
+  const [mnemonic, setMnemonic] = useState("");
+  const [inputSeed, setInputSeed] = useState("");
+
+  const [accounts, setAccounts] = useState<any[]>([]);
+  const [network, setNetwork] = useState<NetworkType>("devnet");
+
+  const [showMnemonic, setShowMnemonic] = useState(false);
+  const [toast, setToast] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [showWarning, setShowWarning] = useState(false);
+
+  const [accountIndex, setAccountIndex] = useState(0);
+
+  const words = mnemonic ? mnemonic.split(" ") : [];
+
+  // 🔑 Auto derive wallets
+  useEffect(() => {
     if (!mnemonic) return;
-    setLoading(true);
-    const count = tab === "generate" ? 5 : 10;
-    const accs = await deriveAccounts(mnemonic, count);
-    const withBalances = await attachBalances(accs, network);
-    setAccounts(withBalances);
-    setLoading(false);
+
+    const load = async () => {
+      setLoading(true);
+
+      const accs = await deriveAccounts(mnemonic, 3);
+      const withBalances = await attachBalances(accs, network);
+
+      setAccounts(withBalances);
+      setAccountIndex(withBalances.length);
+
+      setLoading(false);
+    };
+
+    load();
+  }, [mnemonic, network]);
+
+  // --- Actions ---
+
+  const handleGenerate = () => setShowWarning(true);
+
+  const confirmGenerate = () => {
+    setMnemonic(generateMnemonic());
+    setShowMnemonic(false);
+    setShowWarning(false);
+    setToast("New wallet generated");
+    setTimeout(() => setToast(""), 2000);
   };
 
-  const handleAddAccount = async () => {
+  const handleImport = () => {
+    const cleaned = inputSeed.trim();
+    const words = cleaned.split(/\s+/);
+
+    if (words.length !== 12) {
+      setToast("Seed must be 12 words");
+      setTimeout(() => setToast(""), 2000);
+      return;
+    }
+
+    setMnemonic(cleaned);
+    setShowMnemonic(false);
+    setToast("Wallet imported");
+    setTimeout(() => setToast(""), 2000);
+  };
+
+  const copySeed = () => {
     if (!mnemonic) return;
+
+    navigator.clipboard.writeText(mnemonic);
+    setToast("Copied seed phrase");
+    setTimeout(() => setToast(""), 2000);
+  };
+
+  const addWallet = async () => {
+    if (!mnemonic || loading) return;
+
     setLoading(true);
-    const newAccs = await deriveAccounts(mnemonic, accounts.length + 1);
-    const [withBalance] = await attachBalances([newAccs[newAccs.length - 1]], network);
-    setAccounts(prev => [...prev, withBalance]);
-    setLoading(false);
+
+    try {
+      const accs = await deriveAccounts(mnemonic, accountIndex + 1);
+      const nextAccount = accs[accountIndex];
+
+      if (!nextAccount) throw new Error();
+
+      const [withBalance] = await attachBalances(
+        [nextAccount],
+        network
+      );
+
+      setAccounts((prev) => [...prev, withBalance]);
+      setAccountIndex((prev) => prev + 1);
+
+      setToast("New account added");
+    } catch {
+      setToast("Failed to add account");
+    } finally {
+      setLoading(false);
+      setTimeout(() => setToast(""), 2000);
+    }
   };
 
   return (
-    <main className="min-h-screen bg-zinc-950 text-zinc-100 p-4 md:p-8 selection:bg-indigo-500/30">
-      {/* Background Glow */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden">
-        <div className="absolute top-[-10%] right-[-10%] w-96 h-96 bg-indigo-900/20 rounded-full blur-[128px]" />
-        <div className="absolute bottom-[-10%] left-[-10%] w-96 h-96 bg-purple-900/20 rounded-full blur-[128px]" />
-      </div>
+    <main className="min-h-screen bg-gradient-to-br from-black via-zinc-950 to-black text-white p-6">
 
-      <div className="max-w-5xl mx-auto relative space-y-8">
-        
-        {/* Header */}
-        <header className="flex justify-between items-end">
-          <div>
-            <div className="flex items-center gap-2 text-indigo-400 mb-2">
-              <Sparkles size={16} />
-              <span className="text-xs font-bold uppercase tracking-[0.2em]">Wallet Engine</span>
+      {/* Toast */}
+      <AnimatePresence>
+        {toast && <Toast text={toast} />}
+      </AnimatePresence>
+
+      {/* Warning Modal */}
+      <AnimatePresence>
+        {showWarning && (
+          <motion.div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+            <div className="bg-zinc-900 p-6 rounded-2xl border border-zinc-800 max-w-sm w-full">
+              <div className="flex items-center gap-2 text-red-400 mb-3">
+                <ShieldAlert size={18} />
+                <span className="font-bold">Secret Phrase Warning</span>
+              </div>
+
+              <p className="text-sm text-zinc-400 mb-6">
+                This phrase gives full access to your wallet. Store it securely.
+              </p>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowWarning(false)}
+                  className="flex-1 bg-zinc-800 py-2 rounded-xl"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmGenerate}
+                  className="flex-1 bg-indigo-600 py-2 rounded-xl"
+                >
+                  Continue
+                </button>
+              </div>
             </div>
-            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tighter">Studio <span className="text-zinc-600">v1.0</span></h1>
-          </div>
-          <div className="bg-zinc-900 border border-zinc-800 rounded-full p-1 flex">
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className="max-w-6xl mx-auto space-y-8">
+
+        {/* HEADER */}
+        <div className="flex justify-between items-center">
+          <h1 className="text-3xl font-bold">Wallet Studio</h1>
+
+          <div className="flex gap-2">
             {(["devnet", "mainnet"] as const).map((n) => (
-              <button key={n} onClick={() => setNetwork(n)}
-                className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${network === n ? "bg-indigo-600 text-white" : "text-zinc-500 hover:text-zinc-300"}`}>
-                {n.toUpperCase()}
+              <button
+                key={n}
+                onClick={() => setNetwork(n)}
+                className={`px-4 py-1.5 rounded-full text-xs font-bold ${
+                  network === n ? "bg-indigo-600" : "bg-zinc-800"
+                }`}
+              >
+                {n}
               </button>
             ))}
           </div>
-        </header>
+        </div>
 
         <div className="grid md:grid-cols-12 gap-6">
-          {/* Controls */}
-          <div className="md:col-span-4">
-            <Card className="h-full">
-              <div className="flex gap-2 mb-6">
-                {(["generate", "import"] as const).map((t) => (
-                  <button key={t} onClick={() => setTab(t)} 
-                    className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${tab === t ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-400"}`}>
-                    {t.charAt(0).toUpperCase() + t.slice(1)}
+
+          {/* LEFT PANEL */}
+          <div className="md:col-span-5">
+            <Card>
+
+              {/* MODE SWITCH */}
+              <div className="flex mb-4 bg-zinc-800 p-1 rounded-xl">
+                {["generate", "import"].map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => setMode(t as any)}
+                    className={`flex-1 py-2 rounded-lg text-sm font-medium ${
+                      mode === t
+                        ? "bg-indigo-600 text-white"
+                        : "text-zinc-400"
+                    }`}
+                  >
+                    {t.toUpperCase()}
                   </button>
                 ))}
               </div>
-              
-              <textarea
-                value={mnemonic}
-                onChange={(e) => setMnemonic(e.target.value)}
-                className="w-full h-32 p-4 bg-zinc-950 border border-zinc-800 rounded-2xl text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all resize-none mb-4"
-                placeholder="Paste your 12-word recovery phrase..."
-              />
 
-              <div className="grid grid-cols-2 gap-2 mb-4">
-                <Button variant="secondary" onClick={() => setMnemonic(generateMnemonic())}>
-                  <RefreshCw size={14} /> Seed
-                </Button>
-                <Button onClick={handleLoadAccounts} disabled={loading}>
-                  <Zap size={14} /> {loading ? "Loading..." : "Derive"}
-                </Button>
+              {/* SEED / IMPORT */}
+              {mode === "generate" ? (
+                <div className="grid grid-cols-3 gap-2 mb-4">
+                  {Array.from({ length: 12 }).map((_, i) => (
+                    <div
+                      key={i}
+                      className="p-3 rounded-xl border border-zinc-800 bg-zinc-950 flex justify-between text-sm font-mono"
+                    >
+                      <span className="text-zinc-500 text-xs">{i + 1}</span>
+                      <span className="ml-2 font-medium">
+                        {words[i]
+                          ? showMnemonic
+                            ? words[i]
+                            : "••••"
+                          : "••••"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <textarea
+                  value={inputSeed}
+                  onChange={(e) => setInputSeed(e.target.value)}
+                  placeholder="Enter your 12-word secret phrase..."
+                  className="w-full h-32 p-4 bg-zinc-950 border border-zinc-800 rounded-2xl text-sm outline-none resize-none mb-4"
+                />
+              )}
+
+              {/* ACTIONS */}
+              <div className="flex gap-2 mb-4">
+                <button
+                  onClick={() => setShowMnemonic(!showMnemonic)}
+                  className="flex-1 bg-zinc-800 py-2 rounded-xl flex items-center justify-center gap-2"
+                >
+                  {showMnemonic ? <EyeOff size={14} /> : <Eye size={14} />}
+                  {showMnemonic ? "Hide" : "Show"}
+                </button>
+
+                <button
+                  onClick={copySeed}
+                  className="flex-1 bg-zinc-800 py-2 rounded-xl flex items-center justify-center gap-2"
+                >
+                  <Copy size={14} />
+                  Copy
+                </button>
               </div>
 
-              <Button className="w-full" variant="ghost" onClick={handleAddAccount}>
-                <PlusCircle size={14} /> Add New Wallet
-              </Button>
+              {/* MAIN BUTTON */}
+              <button
+                onClick={mode === "generate" ? handleGenerate : handleImport}
+                className="w-full rounded-2xl bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-600 p-[1px]"
+              >
+                <div className="bg-zinc-900 rounded-2xl py-3 flex items-center justify-center gap-2 hover:bg-zinc-800">
+                  <Sparkles size={16} />
+                  {mode === "generate"
+                    ? "Generate Wallet"
+                    : "Import Wallet"}
+                </div>
+              </button>
+
+              {/* ADD ACCOUNT */}
+              <button
+                onClick={addWallet}
+                disabled={!mnemonic || loading || mode === "import"}
+                className="w-full mt-3 bg-zinc-800 py-2 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                <PlusCircle size={14} />
+                Add Account
+              </button>
+
             </Card>
           </div>
 
-          {/* Results */}
-          <div className="md:col-span-8">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-bold">Active Wallets</h2>
-              <button onClick={() => setShowPrivate(!showPrivate)} className="text-xs font-bold text-zinc-500 hover:text-zinc-300 transition uppercase tracking-wider flex items-center gap-2">
-                {showPrivate ? <EyeOff size={14} /> : <Eye size={14} />} 
-                {showPrivate ? "Hide Keys" : "Show Keys"}
-              </button>
-            </div>
+          {/* RIGHT PANEL */}
+          <div className="md:col-span-7">
+            <Card>
 
-            <div className="space-y-3">
-              <AnimatePresence mode="popLayout">
-                {accounts.map((acc) => (
-                  <motion.div 
-                    key={acc.publicKey}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0 }}
-                    className="bg-zinc-900/50 border border-zinc-800/60 p-4 rounded-2xl flex items-center justify-between hover:border-indigo-500/30 transition-colors"
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 rounded-xl bg-zinc-950 flex items-center justify-center font-bold text-indigo-400">
-                        {acc.index}
-                      </div>
-                      <div className="overflow-hidden">
-                        <p className="text-sm font-mono text-zinc-300 truncate max-w-[200px] md:max-w-md">
+              <h2 className="text-lg font-bold mb-4">Accounts</h2>
+
+              {loading ? (
+                <div className="flex justify-center py-10">
+                  <Loader2 className="animate-spin" />
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {accounts.map((acc, i) => (
+                    <div
+                      key={acc.publicKey}
+                      className="p-4 rounded-xl bg-zinc-950 border border-zinc-800 flex justify-between items-center"
+                    >
+                      <div>
+                        <p className="text-xs text-zinc-500">
+                          Wallet {i + 1}
+                        </p>
+                        <p className="text-sm font-mono truncate max-w-[200px]">
                           {acc.publicKey}
                         </p>
-                        {showPrivate && (
-                          <p className="text-[10px] text-indigo-400 font-mono mt-1 tracking-tight">
-                            SK: {acc.secretKey.slice(0, 16)}...
-                          </p>
-                        )}
                       </div>
+
+                      <p className="font-bold">
+                        {acc.balance}{" "}
+                        <span className="text-xs text-zinc-500">SOL</span>
+                      </p>
                     </div>
-                    <div className="text-right pl-4">
-                      <p className="font-bold text-white">{acc.balance} <span className="text-zinc-500 text-xs font-normal">SOL</span></p>
-                    </div>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-            </div>
+                  ))}
+                </div>
+              )}
+
+            </Card>
           </div>
+
         </div>
       </div>
     </main>
